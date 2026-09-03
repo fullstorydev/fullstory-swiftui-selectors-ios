@@ -1,0 +1,120 @@
+# Publishes a Swift package release for fullstory-swiftui-selectors.
+#
+# The FullStory iOS release server has no VERSION file specific to
+# fullstory-swiftui-selectors, so this reads the shared VERSION file and then
+# requires that *both* the FullStory xcframework and the SwiftUI selectors
+# xcframework exist at that version before releasing anything. FSSwiftUISelectors
+# is built against a specific FullStory build, so releasing one without the other
+# would produce a package that cannot resolve.
+
+name: Update Swift Package Version
+on:
+  # Allow manually triggering this workflow.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (defaults to the current VERSION on the release server)'
+        required: false
+        type: string
+  # Check every day at 2000 UTC, which is 3PM EST, 4PM EDT.
+  # FullStory plugin releases generally go live at 2PM ET.
+  schedule:
+    - cron: '0 20 * * *'
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to push the release commit and tag.
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        # Fetch all tags
+        fetch-depth: 0
+
+    - name: Release if both binaries are available
+      env:
+        RELEASES_URL: https://ios-releases.fullstory.com
+        FULLSTORY_PACKAGE_URL: https://github.com/fullstorydev/fullstory-swift-package-ios
+        REQUESTED_VERSION: ${{ inputs.version }}
+        BRANCH: ${{ github.ref_name }}
+      run: |
+        set -euo pipefail
+
+        http_status() {
+          curl -sS -o /dev/null -I -w '%{http_code}' --retry 3 --retry-delay 5 "$1"
+        }
+
+        if [[ -n "$REQUESTED_VERSION" ]]; then
+          version="$REQUESTED_VERSION"
+          echo "Using manually requested version: $version"
+        else
+          version=$(curl -fsS --retry 3 --retry-delay 5 "${RELEASES_URL}/VERSION" | tr -d '[:space:]')
+          if [[ -z "$version" ]]; then
+            echo "Error fetching current release version!"
+            exit 1
+          fi
+          echo "Current FS iOS release version: $version"
+        fi
+
+        if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Version '$version' is not a valid semantic version!"
+          exit 1
+        fi
+
+        if [ "$(git tag -l "$version")" ]; then
+          echo "Version $version exists in this repo, nothing to do."
+          exit 0
+        fi
+        echo "Tag not found, checking that both binaries are published."
+
+        # FSSwiftUISelectors is only usable alongside the matching FullStory build, so require both.
+        selectors_zip="fullstory-swiftui-selectors-${version}-xcframework.zip"
+        fullstory_zip="fullstory-${version}-xcframework.zip"
+
+        selectors_status=$(http_status "${RELEASES_URL}/${selectors_zip}")
+        fullstory_status=$(http_status "${RELEASES_URL}/${fullstory_zip}")
+        echo "${selectors_zip}: HTTP ${selectors_status}"
+        echo "${fullstory_zip}: HTTP ${fullstory_status}"
+
+        # The generated manifest pins fullstory-swift-package-ios at exactly this version, so the
+        # tag has to exist there too or the package we publish would not resolve. That repo is
+        # updated by its own scheduled job, which can lag behind the release server by a few hours.
+        if git ls-remote --exit-code --tags "$FULLSTORY_PACKAGE_URL" "refs/tags/${version}" >/dev/null 2>&1; then
+          fullstory_tag_found=true
+        else
+          fullstory_tag_found=false
+        fi
+        echo "fullstory-swift-package-ios tag ${version} found: ${fullstory_tag_found}"
+
+        if [[ "$selectors_status" != "200" || "$fullstory_status" != "200" || "$fullstory_tag_found" != "true" ]]; then
+          echo "::notice::Version ${version} is not ready to release yet. Waiting for the SwiftUI selectors binary, the FullStory binary, and the fullstory-swift-package-ios tag to all be published."
+          exit 0
+        fi
+
+        echo "Both binaries are published, building release for ${version}."
+
+        curl -fsSL --retry 3 --retry-delay 5 -o "$selectors_zip" "${RELEASES_URL}/${selectors_zip}"
+
+        # SwiftPM binary target checksums are a plain SHA-256 of the archive, so this matches what
+        # `swift package compute-checksum` would produce without needing a Swift toolchain here.
+        checksum=$(sha256sum "$selectors_zip" | cut -d ' ' -f 1)
+        echo "Checksum: ${checksum}"
+        rm -f "$selectors_zip"
+
+        ./scripts/generate-package-swift.sh "$version" "$checksum"
+
+        # This bot account is the one GitHub recommends for actions that push commits.
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add Package.swift
+        # A re-run after a failed push can leave Package.swift already correct; tag it either way.
+        if git diff --cached --quiet; then
+          echo "Package.swift is already up to date, tagging the current commit."
+        else
+          git commit -m "Update package for ${version} release"
+        fi
+        git tag "$version"
+        git push --tags origin "HEAD:refs/heads/${BRANCH}"
