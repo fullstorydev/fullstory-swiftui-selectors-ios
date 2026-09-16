@@ -6,6 +6,10 @@
 # xcframework exist at that version before releasing anything. FSSwiftUISelectors
 # is built against a specific FullStory build, so releasing one without the other
 # would produce a package that cannot resolve.
+#
+# A release is published as a tag and nothing else. The release commit is never
+# pushed to a branch, so the default branch can stay protected. SwiftPM resolves
+# versions from tags, so the manifest only needs to exist at refs/tags/<version>.
 
 name: Update Swift Package Version
 on:
@@ -25,7 +29,7 @@ jobs:
   check-version:
     runs-on: ubuntu-latest
     permissions:
-      # Needed to push the release commit and tag.
+      # Needed to push the release tag.
       contents: write
 
     steps:
@@ -39,7 +43,6 @@ jobs:
         RELEASES_URL: https://ios-releases.fullstory.com
         FULLSTORY_PACKAGE_URL: https://github.com/fullstorydev/fullstory-swift-package-ios
         REQUESTED_VERSION: ${{ inputs.version }}
-        BRANCH: ${{ github.ref_name }}
       run: |
         set -euo pipefail
 
@@ -110,11 +113,16 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git add Package.swift
-        # A re-run after a failed push can leave Package.swift already correct; tag it either way.
+        # Normally the default branch carries no Package.swift, so this always has something to
+        # commit. It only no-ops if a manifest for this exact version was committed to the branch.
         if git diff --cached --quiet; then
           echo "Package.swift is already up to date, tagging the current commit."
         else
           git commit -m "Update package for ${version} release"
         fi
         git tag "$version"
-        git push --tags origin "HEAD:refs/heads/${BRANCH}"
+
+        # Push the tag only, never the branch. The default branch is protected and requires a pull
+        # request, and pushing it is unnecessary: SwiftPM resolves versions from tags, so the commit
+        # only has to be reachable from refs/tags/<version>. The tag keeps it alive.
+        git push origin "refs/tags/${version}"
