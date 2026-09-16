@@ -45,4 +45,6 @@ The workflow reads the shared `VERSION` file from the release server and only cr
 
 That last check matters because the generated manifest pins `fullstory-swift-package-ios` at exactly this version. That repo is updated by its own scheduled job, so a release server that is a few hours ahead of it would otherwise produce a package that cannot resolve.
 
+A release is only complete when the tag and the default branch both point at the new manifest, so the two refs are pushed with `git push --atomic`: if either is rejected, neither lands, and there is no half-published release to clean up. Each run also checks up front that the default branch contains the latest release tag and fails if it does not, because the duplicate-release check keys on the tag alone and would otherwise keep reporting success while the branch advertised a stale version.
+
 If anything is missing the run exits successfully without changing the repo, so it is safe for the daily schedule to run while a release is still in progress. If a selectors release is ever skipped because the release server has already moved on to a newer `VERSION`, trigger the workflow manually and pass the version you want to publish.
