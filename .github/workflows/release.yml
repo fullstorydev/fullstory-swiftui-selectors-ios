@@ -34,6 +34,36 @@ jobs:
         # Fetch all tags
         fetch-depth: 0
 
+    # A release is only complete once the tag and the default branch both point at the manifest.
+    # Pushing them is not atomic on the server side if it is rejected partway, and the duplicate
+    # check below keys on the tag alone, so a half-finished release would otherwise look done
+    # forever and every later run would report success while the branch advertised a stale version.
+    - name: Check the default branch is in sync with the latest release tag
+      run: |
+        set -euo pipefail
+
+        latest_tag=$(git tag --list '[0-9]*' --sort=-v:refname | head -n 1)
+        if [[ -z "$latest_tag" ]]; then
+          echo "No release tags yet, nothing to compare against."
+          exit 0
+        fi
+
+        # Ancestry rather than equality: the branch is allowed to carry later commits, such as
+        # workflow or README changes merged after a release.
+        if git merge-base --is-ancestor "$latest_tag" HEAD; then
+          echo "Default branch contains the latest release tag ${latest_tag}."
+          exit 0
+        fi
+
+        echo "::error::The default branch does not contain the latest release tag ${latest_tag}, so it advertises an older version than the newest release."
+        echo "This means a tag was published without its commit reaching the default branch."
+        echo "If ${latest_tag} is a descendant of the branch this is a fast-forward and nothing is rewritten:"
+        echo "    git push origin ${latest_tag}:${BRANCH}"
+        echo "Releasing is blocked until the branch is repaired, so the stale manifest is not built on."
+        exit 1
+      env:
+        BRANCH: ${{ github.ref_name }}
+
     - name: Release if both binaries are available
       env:
         RELEASES_URL: https://ios-releases.fullstory.com
@@ -110,11 +140,16 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git add Package.swift
-        # A re-run after a failed push can leave Package.swift already correct; tag it either way.
+        # Package.swift can already be correct if an earlier run committed it to the branch without
+        # managing to tag it; tag it either way.
         if git diff --cached --quiet; then
           echo "Package.swift is already up to date, tagging the current commit."
         else
           git commit -m "Update package for ${version} release"
         fi
         git tag "$version"
-        git push --tags origin "HEAD:refs/heads/${BRANCH}"
+
+        # --atomic so the branch and the tag land together or not at all. Without it a rejected
+        # branch push still leaves the tag behind, which publishes a release that the default branch
+        # does not reflect. Named refspecs rather than --tags so this only pushes the new tag.
+        git push --atomic origin "HEAD:refs/heads/${BRANCH}" "refs/tags/${version}"
