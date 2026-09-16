@@ -39,7 +39,7 @@ Unlike the FullStory SDK, the SwiftUI selectors xcframework does not ship a `Pac
 
 A release is published as a tag and nothing else. The release commit is committed in the runner and only the tag is pushed, so the default branch stays protected and needs no pull request. SwiftPM resolves versions from tags, so the manifest only has to be reachable from `refs/tags/<version>`, and the tag is what keeps that commit alive.
 
-Because of that, the default branch does not track releases. Check out a version tag to see the manifest for that release; the release list is the tag list, not the branch history. Any `Package.swift` sitting on the default branch is a leftover from before releases became tag-only and is not kept current.
+Because of that, the default branch does not track releases and deliberately carries no `Package.swift`. Check out a version tag to see the manifest for that release; the release list is the tag list, not the branch history.
 
 The workflow reads the shared `VERSION` file from the release server and only creates a release once all of the following exist at that version:
 
