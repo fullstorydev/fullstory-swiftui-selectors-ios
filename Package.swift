@@ -23,14 +23,14 @@ let package = Package(
     ],
     dependencies: [
         // FSSwiftUISelectors is built against a specific FullStory build and the two are released in
-        // lockstep, so this is pinned rather than ranged: selectors 1.75.2 requires FullStory 1.75.2.
-        .package(url: "https://github.com/fullstorydev/fullstory-swift-package-ios", exact: "1.75.2"),
+        // lockstep, so this is pinned rather than ranged: selectors 1.76.0 requires FullStory 1.76.0.
+        .package(url: "https://github.com/fullstorydev/fullstory-swift-package-ios", exact: "1.76.0"),
     ],
     targets: [
         .binaryTarget(
             name: "FSSwiftUISelectors",
-            url: "https://ios-releases.fullstory.com/fullstory-swiftui-selectors-1.75.2-xcframework.zip",
-            checksum: "3c6c7ccd243f8b70a35f31e85960c4c924e2eacf506a2ce3b1064ca126a77e2d"
+            url: "https://ios-releases.fullstory.com/fullstory-swiftui-selectors-1.76.0-xcframework.zip",
+            checksum: "737789ae98946bf29f8bb6ad3852568a531a4231fb8f399c1e0c606d6fd81841"
         ),
         // Carries the FullStory dependency for the binary target above, which cannot declare
         // dependencies of its own. Contains no code.
